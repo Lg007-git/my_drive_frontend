@@ -1,16 +1,25 @@
 import React, { useState, useEffect, useContext } from "react";
 import { AuthContext } from "../context/AuthContext";
 import api from "../api/axios";
-import toast from "react-hot-toast";
+import notify from "react-hot-toast";
+import { toast } from "react-toastify";
 
 export default function Dashboard() {
   const { user, logout } = useContext(AuthContext);
 
-  const [folders, setFolders] = useState([]);      // always an array
-  const [files, setFiles] = useState([]);          // always an array
+  const [folders, setFolders] = useState([]); // always an array
+  const [files, setFiles] = useState([]); // always an array
   const [currentFolderId, setCurrentFolderId] = useState(null); // null = root
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [breadcrumb, setBreadcrumb] = useState([]); // array of { id, name }
+  const [currentFolder, setCurrentFolder] = useState(null); // active folder object
+  
+  // Share Modal
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [shareWith, setShareWith] = useState("");
+  const [role, setRole] = useState("viewer");
 
   // Create a folder in current location
   const handleCreateFolder = async () => {
@@ -18,16 +27,22 @@ export default function Dashboard() {
     if (!name?.trim()) return;
     try {
       await api.post("/folders/create", { name, parentId: currentFolderId });
-      toast.success("Folder created");
+      notify.success("Folder created");
       await fetchData();
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to create folder");
+      notify.error(err.response?.data?.message || "Failed to create folder");
     }
   };
 
   // Open a folder (drill down)
   const openFolder = (folderId) => {
-    setCurrentFolderId(folderId);
+    setCurrentFolderId(folderId.id);
+    setCurrentFolder(folderId);
+    // console.log("Opening folder:", folderId);
+    setBreadcrumb((prev) => [
+    ...prev,
+    { id: folderId, name: folderId.name },
+  ]);
   };
 
   // Go to root
@@ -36,14 +51,16 @@ export default function Dashboard() {
   // Get signed URL and open file
   const openFile = async (fileId) => {
     try {
+      // console.log("Opening file:", fileId);
+      
       const { data } = await api.get(`/files/${fileId}`);
       if (data?.signedUrl) {
         window.open(data.signedUrl, "_blank", "noopener,noreferrer");
       } else {
-        toast.error("No signed URL returned");
+        notify.error("No signed URL returned");
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to open file");
+      notify.error(err.response?.data?.message || "Failed to open file");
     }
   };
 
@@ -53,10 +70,10 @@ export default function Dashboard() {
     try {
       // backend route: DELETE /files/file/:fileId
       await api.delete(`/files/file/${id}`);
-      toast.success("File moved to trash");
+      notify.success("File moved to trash");
       await fetchData();
     } catch (err) {
-      toast.error(err.response?.data?.message || "Delete failed");
+      notify.error(err.response?.data?.message || "Delete failed");
     }
   };
 
@@ -70,10 +87,10 @@ export default function Dashboard() {
       formData.append("file", file);
       if (currentFolderId) formData.append("folderId", currentFolderId);
       await api.post("/files/upload", formData);
-      toast.success("File uploaded");
+      notify.success("File uploaded");
       await fetchData();
     } catch (err) {
-      toast.error(err.response?.data?.message || "Upload failed");
+      notify.error(err.response?.data?.message || "Upload failed");
     } finally {
       setUploading(false);
       e.target.value = ""; // reset input
@@ -86,13 +103,19 @@ export default function Dashboard() {
       setLoading(true);
       const [foldersRes, filesRes] = await Promise.all([
         api.get("/folders", { params: { parentId: currentFolderId } }),
-        api.get("/files", { params: { folderId: currentFolderId, limit: 100, offset: 0 } }),
+        api.get("/files", {
+          params: { folderId: currentFolderId, limit: 100, offset: 0 },
+        }),
       ]);
-      setFolders(Array.isArray(foldersRes?.data?.folders) ? foldersRes.data.folders : []);
+      setFolders(
+        Array.isArray(foldersRes?.data?.folders) ? foldersRes.data.folders : []
+      );
       setFiles(Array.isArray(filesRes?.data?.files) ? filesRes.data.files : []);
     } catch (err) {
       console.error(err);
-      toast.error(err.response?.data?.message || "Failed to fetch files/folders");
+      notify.error(
+        err.response?.data?.message || "Failed to fetch files/folders"
+      );
       setFolders([]); // keep arrays to avoid .map crash
       setFiles([]);
     } finally {
@@ -105,17 +128,94 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentFolderId]);
 
+  const goToFolder = (folderId) => {
+  if (!folderId) {
+    // Back to root
+    setCurrentFolderId(null);
+    setCurrentFolder(null);
+    setBreadcrumb([]);
+    return;
+  }
+
+  // Find position of the folder in breadcrumb
+  const idx = breadcrumb.findIndex((b) => b.id === folderId);
+  if (idx !== -1) {
+    setCurrentFolderId(breadcrumb[idx].id);
+    setCurrentFolder(breadcrumb[idx]);
+    setBreadcrumb(breadcrumb.slice(0, idx + 1)); // trim trail
+  }
+};
+
+  const   handleOpenShareModal = (file) => {
+    setSelectedFile(file);
+    setShareWith("");
+    setRole("viewer");
+    setShareModalOpen(true);
+  };
+
+  const handleShareSubmit = async (e) => {
+    e.preventDefault();
+    if (!selectedFile) return;
+
+    try {
+      await api.post("/sharing/share", {
+        fileId: selectedFile.id,
+        sharedWith: shareWith,
+        role,
+      });
+      notify.success("File shared successfully");
+      setShareModalOpen(false);
+    } catch (err) {
+      notify.error(err.response?.data?.message || "Failed to share file");
+    }
+  };
+  const fetchPermissions = async (fileId) => {
+    try {
+      const { data } = await api.get(`/sharing/permission/${fileId}`);
+      
+      const permissions = data.permissions || data; 
+      // console.log("Permissions for file:", permissions);
+      if (!permissions || permissions.length === 0) {
+      toast.info("Not shared with anyone");
+      return;
+    }
+      // notify("hi");
+      notify(
+        "Shared with: " +
+          (permissions
+            .map((p) => `${p.shared_with } (${p.role})`)
+            .join(", ") || "No one")
+      );
+    } catch (err) {
+      
+      // console.error("Fetch permissions error:", err.response?.data || err);
+      notify.error(err.response?.data?.message || "Failed to fetch permissions");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       {/* Top Bar */}
       <div className="flex justify-between items-center mb-6">
-        <div className="flex items-center gap-2">
-          <button onClick={goRoot} className="text-blue-600 hover:underline">Root</button>
-          <span className="text-gray-400">/</span>
-          <span className="text-gray-600">
-            {currentFolderId ? "Folder" : "Home"}
+        <div className="flex items-center gap-2 text-blue-600 mb-4">
+        <span
+          className="cursor-pointer hover:underline"
+          onClick={() => goToFolder(null)}
+        >
+          Root
+        </span>
+        {breadcrumb.map((b, idx) => (
+          <span key={`${b.id || "root"}-${idx}`} className="flex items-center gap-2">
+            <span>/</span>
+            <span
+              className="cursor-pointer hover:underline"
+              onClick={() => goToFolder(b.id)}
+            >
+              {b.name}
+            </span>
           </span>
-        </div>
+        ))}
+      </div>
         <div className="flex items-center gap-2">
           <button
             onClick={handleCreateFolder}
@@ -151,7 +251,7 @@ export default function Dashboard() {
                 {folders.map((f) => (
                   <button
                     key={f.id}
-                    onClick={() => openFolder(f.id)}
+                    onClick={() => openFolder(f)}
                     className="w-full text-left bg-white border rounded-xl p-4 shadow-sm hover:shadow transition"
                   >
                     <div className="font-medium">📁 {f.name}</div>
@@ -174,7 +274,10 @@ export default function Dashboard() {
             ) : (
               <ul className="divide-y divide-gray-200 bg-white border rounded-xl shadow-sm">
                 {files.map((file) => (
-                  <li key={file.id} className="flex items-center justify-between p-3">
+                  <li
+                    key={file.id}
+                    className="flex items-center justify-between p-3"
+                  >
                     <div>
                       <div className="font-medium">{file.name}</div>
                       <div className="text-xs text-gray-500">
@@ -194,6 +297,18 @@ export default function Dashboard() {
                       >
                         Delete
                       </button>
+                      <button
+                        onClick={() => handleOpenShareModal(file)}
+                        className="text-green-600 hover:underline"
+                      >
+                        Share
+                      </button>
+                      <button
+                        onClick={() => fetchPermissions(file.id)}
+                        className="text-purple-600 hover:underline"
+                      >
+                        View Shares
+                      </button>
                     </div>
                   </li>
                 ))}
@@ -202,6 +317,58 @@ export default function Dashboard() {
           </section>
         </div>
       )}
+
+      {shareModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+          <div className="bg-white p-6 rounded-lg shadow-lg w-96">
+            <h3 className="text-lg font-semibold mb-4">
+              Share File: {selectedFile?.name}
+            </h3>
+            <form onSubmit={handleShareSubmit} className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium">
+                  Share with (user ID or email):
+                </label>
+                <input
+                  type="text"
+                  value={shareWith}
+                  onChange={(e) => setShareWith(e.target.value)}
+                  required
+                  className="w-full border rounded p-2"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium">Role:</label>
+                <select
+                  value={role}
+                  onChange={(e) => setRole(e.target.value)}
+                  className="w-full border rounded p-2"
+                >
+                  <option value="viewer">Viewer</option>
+                  <option value="editor">Editor</option>
+                  <option value="owner">Owner</option>
+                </select>
+              </div>
+              <div className="flex justify-end gap-3 mt-4">
+                <button
+                  type="button"
+                  onClick={() => setShareModalOpen(false)}
+                  className="px-4 py-2 bg-gray-300 rounded"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-green-600 text-white rounded"
+                >
+                  Share
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

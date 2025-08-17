@@ -16,7 +16,7 @@ export const AuthProvider = ({ children }) => {
         localStorage.removeItem("user"); // cleanup bad data
       }
     } catch (err) {
-      console.error("Invalid user JSON in localStorage", err);
+      // console.error("Invalid user JSON in localStorage", err);
       localStorage.removeItem("user"); // cleanup if broken
     }
   }, []);
