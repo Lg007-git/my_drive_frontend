@@ -21,6 +21,11 @@ export default function Dashboard() {
   const [shareWith, setShareWith] = useState("");
   const [role, setRole] = useState("viewer");
 
+  const [trashOpen, setTrashOpen] = useState(false);
+const [trashFiles, setTrashFiles] = useState([]);
+const [trashFolders, setTrashFolders] = useState([]);
+
+
   // Create a folder in current location
   const handleCreateFolder = async () => {
     const name = window.prompt("Folder name?");
@@ -102,7 +107,7 @@ export default function Dashboard() {
     try {
       setLoading(true);
       const [foldersRes, filesRes] = await Promise.all([
-        api.get("/folders", { params: { parentId: currentFolderId } }),
+        api.get("/folders/", { params: { parentId: currentFolderId } }),
         api.get("/files", {
           params: { folderId: currentFolderId, limit: 100, offset: 0 },
         }),
@@ -122,6 +127,21 @@ export default function Dashboard() {
       setLoading(false);
     }
   };
+
+  const fetchTrash = async () => {
+  try {
+    const [filesRes, foldersRes] = await Promise.all([
+      api.get("/files/trash"),
+      api.get("/folders/trash") // <— if backend has it
+    ]);
+    setTrashFiles(Array.isArray(filesRes.data.files) ? filesRes.data.files : []);
+    setTrashFolders(Array.isArray(foldersRes.data.folders) ? foldersRes.data.folders : []);
+    setTrashOpen(true);
+    // console.log("Trash folders:", foldersRes.data.folders);
+  } catch (err) {
+    notify.error(err.response?.data?.message || "Failed to fetch trash");
+  }
+};
 
   useEffect(() => {
     fetchData();
@@ -143,6 +163,16 @@ export default function Dashboard() {
     setCurrentFolderId(breadcrumb[idx].id);
     setCurrentFolder(breadcrumb[idx]);
     setBreadcrumb(breadcrumb.slice(0, idx + 1)); // trim trail
+  }
+};
+
+const handleDeleteFolder = async (folderId) => {
+  try {
+    await api.delete(`/folders/folder/${folderId}`);
+    notify.success("Folder moved to trash");
+    await fetchData();// refresh
+  } catch (err) {
+    notify.error(err.response?.data?.message || "Failed to delete folder");
   }
 };
 
@@ -228,6 +258,12 @@ export default function Dashboard() {
             <input type="file" onChange={handleUpload} className="hidden" />
           </label>
           <button
+  onClick={fetchTrash}
+  className="bg-gray-700 text-white px-4 py-2 rounded-lg hover:bg-gray-800"
+>
+  🗑️ Trash
+</button>
+          <button
             onClick={logout}
             className="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600"
           >
@@ -244,24 +280,62 @@ export default function Dashboard() {
           {/* Folders */}
           <section>
             <h2 className="text-lg font-semibold mb-3">Folders</h2>
-            {folders.length === 0 ? (
-              <p className="text-gray-500">No folders here.</p>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                {folders.map((f) => (
-                  <button
-                    key={f.id}
-                    onClick={() => openFolder(f)}
-                    className="w-full text-left bg-white border rounded-xl p-4 shadow-sm hover:shadow transition"
-                  >
-                    <div className="font-medium">📁 {f.name}</div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      Created: {new Date(f.created_at).toLocaleString()}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
+           {folders.length === 0 ? (
+  <p className="text-gray-500">No folders here.</p>
+) : (
+  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+    {folders.map((f) => (
+      <div
+        key={f.id}
+        className="w-full bg-white border rounded-xl p-4 shadow-sm hover:shadow transition flex flex-col justify-between"
+      >
+        {/* Top row: folder name + delete button */}
+        <div className="flex items-center justify-between">
+          <span
+            className="font-medium cursor-pointer hover:underline"
+            onClick={() => openFolder(f)}
+          >
+            📁 {f.name}
+          </span>
+          <button
+  onClick={async () => {
+    const newName = prompt("Enter new name:", f.name);
+    if (!newName) return;
+
+    try {
+      await api.patch(`/folders/${f.id}`, { name: newName });
+      notify.success("Folder renamed");
+      fetchData();
+    } catch (err) {
+      notify.error("Failed to rename");
+    }
+  }}
+>
+  📝
+</button>
+
+          <button
+            onClick={(e) => {
+              e.stopPropagation(); // prevent openFolder
+              handleDeleteFolder(f.id);
+            }}
+            className="text-red-500 hover:text-red-700"
+            title="Move to Trash"
+          >
+            🗑️
+          </button>
+        </div>
+
+        {/* Metadata */}
+        <div className="text-xs text-gray-500 mt-2">
+          Created: {new Date(f.created_at).toLocaleString()}
+        </div>
+      </div>
+    ))}
+  </div>
+)}
+
+
           </section>
 
           {/* Files in current folder (or root) */}
@@ -297,6 +371,22 @@ export default function Dashboard() {
                       >
                         Delete
                       </button>
+                      <button
+  onClick={async () => {
+    const newName = prompt("Enter new name:", file.name);
+    if (!newName) return;
+
+    try {
+      await api.patch(`/files/${file.id}`, { name: newName });
+      notify.success("File renamed");
+      fetchData();
+    } catch (err) {
+      notify.error("Failed to rename");
+    }
+  }}
+>
+  📝
+</button>
                       <button
                         onClick={() => handleOpenShareModal(file)}
                         className="text-green-600 hover:underline"
@@ -368,6 +458,129 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {trashOpen && (
+  <div className="fixed inset-0 border-4 border-blue-500 flex items-center justify-center">
+    <div className="bg-white border-4 border-blue-500 p-6 rounded-lg shadow-lg w-[500px] max-h-[80vh] overflow-y-auto">
+      <h3 className="text-lg font-semibold mb-4">Trash</h3>
+
+      {trashFiles.length === 0 && trashFolders.length === 0 ? (
+        <p className="text-gray-500">Trash is empty.</p>
+      ) : (
+        <ul className="divide-y divide-gray-200">
+          {trashFolders.length > 0 && (
+            <div>
+              <h4 className="font-semibold mb-2">Folders</h4>
+              <ul className="divide-y divide-gray-200">
+                {trashFolders.map((folder) => (
+                  <li
+                    key={folder.id}
+                    className="flex items-center justify-between p-3"
+                  >
+                    <div>
+                      <div className="font-medium">{folder.name}</div>
+                      <div className="text-xs text-gray-500">Folder</div>
+                    </div>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={async () => {
+                          try {
+                            await api.post(`/folders/folder/restore/${folder.id}`);
+                            notify.success("Folder restored");
+                            fetchTrash();
+                            fetchData();  
+                          } catch (err) {
+                            notify.error("Failed to restore folder");
+                          }
+                        }}
+                        className="text-green-600 hover:underline"
+                      >
+                        Restore
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (
+                            !window.confirm("Permanently delete this folder?")
+                          )
+                            return;
+                          try {
+                            await api.delete(
+                              `/folders/${folder.id}`
+                            );
+                            notify.success("Folder permanently deleted");
+                            fetchTrash();
+                          } catch (err) {
+                            notify.error("Failed to delete folder");
+                          }
+                        }}
+                        className="text-red-600 hover:underline"
+                      >
+                        Delete Permanently
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          
+          {trashFiles.map((file) => (
+            
+            <li key={file.id} className="flex items-center justify-between p-3">
+              <div>
+                <h4 className="font-semibold mb-2">Files</h4>
+                <div className="font-medium">{file.name}</div>
+                <div className="text-xs text-gray-500">
+                  {file.type} • {(file.size / 1024).toFixed(1)} KB
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={async () => {
+                    try {
+                      await api.post(`/files/file/restore/${file.id}`);
+                      notify.success("File restored");
+                      fetchTrash();
+                      fetchData();
+                    } catch (err) {
+                      notify.error("Failed to restore");
+                    }
+                  }}
+                  className="text-green-600 hover:underline"
+                >
+                  Restore
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!window.confirm("Permanently delete this file?")) return;
+                    try {
+                      await api.delete(`/files/file/permanent/${file.id}`);
+                      notify.success("File permanently deleted");
+                      fetchTrash();
+                    } catch (err) {
+                      notify.error("Failed to delete");
+                    }
+                  }}
+                  className="text-red-600 hover:underline"
+                >
+                  Delete Permanently
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex justify-end mt-4">
+        <button
+          onClick={() => setTrashOpen(false)}
+          className="px-4 py-2 bg-gray-300 rounded"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+)}
 
     </div>
   );
