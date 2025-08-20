@@ -52,7 +52,7 @@ export default function Login() {
         >
           Login
         </button>
-
+        
         <p
           onClick={() => navigate("/register")}
           className="mt-4 text-sm text-blue-600 cursor-pointer"
