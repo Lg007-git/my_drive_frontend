@@ -3,6 +3,8 @@ import { AuthContext } from "../context/AuthContext";
 import api from "../api/axios";
 import notify from "react-hot-toast";
 import { toast } from "react-toastify";
+import Navbar from "./Navbar";
+
 
 export default function Dashboard() {
   const { user, logout } = useContext(AuthContext);
@@ -24,6 +26,9 @@ export default function Dashboard() {
   const [trashOpen, setTrashOpen] = useState(false);
 const [trashFiles, setTrashFiles] = useState([]);
 const [trashFolders, setTrashFolders] = useState([]);
+
+const [filteredFolders, setFilteredFolders] = useState([]);
+  const [filteredFiles, setFilteredFiles] = useState([])
 
 
   // Create a folder in current location
@@ -116,6 +121,8 @@ const [trashFolders, setTrashFolders] = useState([]);
         Array.isArray(foldersRes?.data?.folders) ? foldersRes.data.folders : []
       );
       setFiles(Array.isArray(filesRes?.data?.files) ? filesRes.data.files : []);
+      setFilteredFolders(Array.isArray(foldersRes?.data?.folders) ? foldersRes.data.folders : []);
+      setFilteredFiles(Array.isArray(filesRes?.data?.files) ? filesRes.data.files : []  );
     } catch (err) {
       console.error(err);
       notify.error(
@@ -123,6 +130,7 @@ const [trashFolders, setTrashFolders] = useState([]);
       );
       setFolders([]); // keep arrays to avoid .map crash
       setFiles([]);
+      
     } finally {
       setLoading(false);
     }
@@ -147,6 +155,17 @@ const [trashFolders, setTrashFolders] = useState([]);
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentFolderId]);
+
+  const handleSearch = (query) => {
+    if (!query.trim()) {
+      setFilteredFolders(folders);
+      setFilteredFiles(files);
+      return;
+    }
+    const lower = query.toLowerCase();
+    setFilteredFolders(folders.filter((f) => f.name.toLowerCase().includes(lower)));
+    setFilteredFiles(files.filter((f) => f.name.toLowerCase().includes(lower)));
+  };
 
   const goToFolder = (folderId) => {
   if (!folderId) {
@@ -188,12 +207,19 @@ const handleDeleteFolder = async (folderId) => {
     if (!selectedFile) return;
 
     try {
-      await api.post("/sharing/share", {
+        const response = await api.post("/sharing/share", {
         fileId: selectedFile.id,
-        sharedWith: shareWith,
+        sharedWith: shareWith.trim() === "" ? null : shareWith.trim(),
         role,
       });
+      if (response.data.file.generalUrl) {
+          notify.success(`Link: ${response.data.file.generalUrl}`);
+          // maybe copy to clipboard:
+          navigator.clipboard.writeText(response.data.file.generalUrl);
+      }
+      else{
       notify.success("File shared successfully");
+      }
       setShareModalOpen(false);
     } catch (err) {
       notify.error(err.response?.data?.message || "Failed to share file");
@@ -224,7 +250,10 @@ const handleDeleteFolder = async (folderId) => {
   };
 
   return (
+    
     <div className="min-h-screen bg-gray-50 p-6">
+      <Navbar onSearch={handleSearch} />
+
       {/* Top Bar */}
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center gap-2 text-blue-600 mb-4">
@@ -280,11 +309,11 @@ const handleDeleteFolder = async (folderId) => {
           {/* Folders */}
           <section>
             <h2 className="text-lg font-semibold mb-3">Folders</h2>
-           {folders.length === 0 ? (
+           {filteredFolders.length === 0 ? (
   <p className="text-gray-500">No folders here.</p>
 ) : (
   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-    {folders.map((f) => (
+    {filteredFolders.map((f) => (
       <div
         key={f.id}
         className="w-full bg-white border rounded-xl p-4 shadow-sm hover:shadow transition flex flex-col justify-between"
@@ -343,11 +372,11 @@ const handleDeleteFolder = async (folderId) => {
             <h2 className="text-lg font-semibold mb-3">
               {currentFolderId ? "Files in this folder" : "Files in Root"}
             </h2>
-            {files.length === 0 ? (
+            {filteredFiles.length === 0 ? (
               <p className="text-gray-500">No files here.</p>
             ) : (
               <ul className="divide-y divide-gray-200 bg-white border rounded-xl shadow-sm">
-                {files.map((file) => (
+                {filteredFiles.map((file) => (
                   <li
                     key={file.id}
                     className="flex items-center justify-between p-3"
@@ -409,7 +438,7 @@ const handleDeleteFolder = async (folderId) => {
       )}
 
       {shareModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+        <div className="fixed inset-0 flex items-center justify-center">
           <div className="bg-white p-6 rounded-lg shadow-lg w-96">
             <h3 className="text-lg font-semibold mb-4">
               Share File: {selectedFile?.name}
@@ -423,7 +452,7 @@ const handleDeleteFolder = async (folderId) => {
                   type="text"
                   value={shareWith}
                   onChange={(e) => setShareWith(e.target.value)}
-                  required
+                  placeholder="User ID or leave blank for link"
                   className="w-full border rounded p-2"
                 />
               </div>
