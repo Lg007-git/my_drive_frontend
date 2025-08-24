@@ -51,7 +51,7 @@ const [filteredFolders, setFilteredFolders] = useState([]);
     // console.log("Opening folder:", folderId);
     setBreadcrumb((prev) => [
     ...prev,
-    { id: folderId, name: folderId.name },
+    { id: folderId.id, name: folderId.name },
   ]);
   };
 
