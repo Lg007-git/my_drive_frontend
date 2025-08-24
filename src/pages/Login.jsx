@@ -33,6 +33,7 @@ export default function Login() {
         <input
           type="email"
           placeholder="Email"
+          required
           className="w-full p-2 border rounded mb-3"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -42,6 +43,7 @@ export default function Login() {
           type="password"
           placeholder="Password"
           className="w-full p-2 border rounded mb-3"
+          required
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
