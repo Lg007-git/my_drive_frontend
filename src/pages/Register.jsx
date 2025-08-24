@@ -16,7 +16,7 @@ export default function Register() {
       const { data } = await api.post("/auth/signup", { email, password });
       login(data.id, data.token, data.email); // ✅ auto-login after signup
       toast.success("Account created successfully!");
-      navigate("/");
+      navigate("/login");
     } catch (err) {
       toast.error(err.response?.data?.message || "Signup failed");
     }
