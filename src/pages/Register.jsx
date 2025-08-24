@@ -34,6 +34,7 @@ export default function Register() {
           type="email"
           placeholder="Email"
           className="w-full p-2 border rounded mb-3"
+          required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
@@ -43,7 +44,9 @@ export default function Register() {
           placeholder="Password"
           className="w-full p-2 border rounded mb-3"
           value={password}
+          reuired
           onChange={(e) => setPassword(e.target.value)}
+          
         />
 
         <button
